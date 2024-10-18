@@ -25,7 +25,14 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Step 4: Build and push the Docker image
+      # Step 4: Extract repository name (in lowercase)
+      - name: Extract repository name
+        id: extract_repo
+        run: |
+          REPO_NAME=$(echo "${GITHUB_REPOSITORY##*/}" | tr '[:upper:]' '[:lower:]')
+          echo "::set-output name=repo_name::$REPO_NAME"
+
+      # Step 5: Build and push the Docker image
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -35,7 +42,6 @@ jobs:
             ${{ secrets.DOCKER_USERNAME }}/${{ steps.extract_repo.outputs.repo_name }}:latest
             ${{ secrets.DOCKER_USERNAME }}/${{ steps.extract_repo.outputs.repo_name }}:${{ github.ref_name }}
 
-
-      # Step 5: Verify the Docker image (optional)
+      # Step 6: Verify the Docker image (optional)
       - name: Verify Docker image
-        run: docker pull ${{ secrets.DOCKER_USERNAME }}/realtimerequestlogger:${{ github.ref_name }}
+        run: docker pull ${{ secrets.DOCKER_USERNAME }}/${{ steps.extract_repo.outputs.repo_name }}:${{ github.ref_name }}
