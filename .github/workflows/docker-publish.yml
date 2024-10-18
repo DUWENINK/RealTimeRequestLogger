@@ -31,8 +31,8 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/RealTimeRequestLogger:${{ github.ref_name }}
+          tags: ${{ secrets.DOCKER_USERNAME }}/realtimerequestlogger:${{ github.ref_name }}
 
       # Step 5: Verify the Docker image (optional)
       - name: Verify Docker image
-        run: docker pull ${{ secrets.DOCKER_USERNAME }}/RealTimeRequestLogger:${{ github.ref_name }}
+        run: docker pull ${{ secrets.DOCKER_USERNAME }}/realtimerequestlogger:${{ github.ref_name }}
