@@ -1,0 +1,247 @@
+﻿@page
+@model IndexModel
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>@ViewData["Title"]</title>
+    <!-- 本地 Tailwind CSS -->
+    <link rel="stylesheet" href="~/css/tailwind.min.css">
+    <style>
+        /* 调整的样式 */
+        .log-container {
+            height: 1000px;
+            width:1800px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: left;
+        }
+
+        th {
+            background-color: #edf2f7;
+            color: #2d3748;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f7fafc;
+        }
+
+        tr:hover {
+            background-color: #ebf8ff;
+        }
+
+        /* 按钮样式 */
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            border-radius: 5px;
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
+        }
+
+        .btn-red {
+            background-color: #e53e3e;
+            color: white;
+        }
+
+        .btn-red:hover {
+            background-color: #c53030;
+        }
+
+        .btn-blue {
+            background-color: #3182ce;
+            color: white;
+        }
+
+        .btn-blue:hover {
+            background-color: #2b6cb0;
+        }
+
+        .btn-green {
+            background-color: #38a169;
+            color: white;
+        }
+
+        .btn-green:hover {
+            background-color: #2f855a;
+        }
+
+        .btn {
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 时间戳样式 */
+        .timestamp {
+            font-family: monospace;
+            color: #718096;
+        }
+
+
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div class="container mx-auto py-8">
+        <h1 class="text-3xl font-bold text-center mb-8" id="page-title">Real-Time Request Logger</h1>
+
+        <!-- 操作按钮 -->
+        <div class="flex justify-end mb-4 space-x-2">
+            <button id="clearLogsBtn" class="btn btn-red">
+                Clear Logs
+            </button>
+            <button id="downloadLogsBtn" class="btn btn-blue">
+                Download Logs
+            </button>
+            <button id="switchLangBtn" class="btn btn-green">
+                Switch to 中文
+            </button>
+        </div>
+
+        <!-- 请求日志表格 -->
+        <div class="bg-white shadow-md rounded-lg p-4 log-container">
+            <table class="table-auto">
+                <thead>
+                    <tr>
+                        <th id="th-timestamp">Timestamp</th>
+                        <th id="th-method">Method</th>
+                        <th id="th-path">Path</th>
+                        <th id="th-query">Query String</th>
+                        <th id="th-headers">Headers</th>
+                        <th id="th-body">Body</th>
+                    </tr>
+                </thead>
+                <tbody id="logTable" class="text-gray-600 text-sm font-light">
+                    <!-- 实时数据将被插入到这里 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 本地 SignalR JS -->
+    <script src="~/js/signalr.min.js"></script>
+    <script type="text/javascript">
+        let logData = [];
+        let currentLang = 'en'; // 默认语言为英语
+
+        const translations = {
+            en: {
+                pageTitle: "Real-Time Request Logger",
+                clearLogs: "Clear Logs",
+                downloadLogs: "Download Logs",
+                switchLang: "Switch to 中文",
+                timestamp: "Timestamp",
+                method: "Method",
+                path: "Path",
+                query: "Query String",
+                headers: "Headers",
+                body: "Body",
+            },
+            zh: {
+                pageTitle: "实时请求日志记录",
+                clearLogs: "清空日志",
+                downloadLogs: "下载日志",
+                switchLang: "切换到 English",
+                timestamp: "时间戳",
+                method: "方法",
+                path: "路径",
+                query: "查询字符串",
+                headers: "请求头",
+                body: "请求体",
+            }
+        };
+
+        function switchLanguage() {
+            currentLang = currentLang === 'en' ? 'zh' : 'en';
+            const text = translations[currentLang];
+
+            document.getElementById('page-title').textContent = text.pageTitle;
+            document.getElementById('clearLogsBtn').textContent = text.clearLogs;
+            document.getElementById('downloadLogsBtn').textContent = text.downloadLogs;
+            document.getElementById('switchLangBtn').textContent = text.switchLang;
+            document.getElementById('th-timestamp').textContent = text.timestamp;
+            document.getElementById('th-method').textContent = text.method;
+            document.getElementById('th-path').textContent = text.path;
+            document.getElementById('th-query').textContent = text.query;
+            document.getElementById('th-headers').textContent = text.headers;
+            document.getElementById('th-body').textContent = text.body;
+        }
+
+        document.getElementById('switchLangBtn').addEventListener('click', switchLanguage);
+
+        // 连接到 SignalR Hub
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/requestHub")
+            .build();
+
+        connection.on("ReceiveRequestDetails", function(message) {
+            const logTable = document.getElementById("logTable");
+
+            const timestamp = new Date().toLocaleTimeString();
+            const lines = message.split("\n");
+            const methodLine = lines.find(line => line.startsWith("Method:"));
+            const pathLine = lines.find(line => line.startsWith("Path:"));
+            const queryString = lines.find(line => line.startsWith("Query String:"));
+            const headersLine = lines.slice(lines.indexOf("Headers:") + 1, lines.indexOf("Body:")).join("<br>");
+            const bodyLine = lines.slice(lines.indexOf("Body:") + 1).join("<br>");
+
+            const newRow = document.createElement("tr");
+            newRow.className = "border-b border-gray-200 hover:bg-gray-100";
+
+            newRow.innerHTML = `
+                <td class="timestamp">${timestamp}</td>
+                <td>${methodLine.replace("Method: ", "")}</td>
+                <td>${pathLine.replace("Path: ", "")}</td>
+                <td>${queryString ? queryString.replace("Query String: ", "") : ""}</td>
+                <td>${headersLine}</td>
+                <td>${bodyLine}</td>
+            `;
+
+            logTable.appendChild(newRow);
+
+            logData.push({
+                timestamp,
+                method: methodLine.replace("Method: ", ""),
+                path: pathLine.replace("Path: ", ""),
+                queryString: queryString ? queryString.replace("Query String: ", "") : "",
+                headers: headersLine,
+                body: bodyLine
+            });
+        });
+
+        connection.start().catch(function(err) {
+            return console.error(err.toString());
+        });
+
+        document.getElementById("clearLogsBtn").addEventListener("click", function() {
+            document.getElementById("logTable").innerHTML = "";  // 清空表格
+            logData = [];  // 清空日志数据
+        });
+
+        document.getElementById("downloadLogsBtn").addEventListener("click", function() {
+            const blob = new Blob([JSON.stringify(logData, null, 2)], { type: "application/json" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "request-logs.json";
+            link.click();
+        });
+    </script>
+</body>
+</html>
