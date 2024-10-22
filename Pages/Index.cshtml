@@ -11,8 +11,8 @@
     <style>
         /* 调整的样式 */
         .log-container {
-            height: 1000px;
-            width:1800px;
+            height: calc(100vh - 200px); /* 使表格占满全屏 */
+            width: 100%;
             overflow-y: auto;
             background-color: #f8f9fa;
             padding: 10px;
@@ -35,6 +35,9 @@
         th {
             background-color: #edf2f7;
             color: #2d3748;
+            position: sticky;
+            top: 0;
+            z-index: 1;
         }
 
         tr:nth-child(even) {
@@ -62,27 +65,27 @@
             color: white;
         }
 
-        .btn-red:hover {
-            background-color: #c53030;
-        }
+            .btn-red:hover {
+                background-color: #c53030;
+            }
 
         .btn-blue {
             background-color: #3182ce;
             color: white;
         }
 
-        .btn-blue:hover {
-            background-color: #2b6cb0;
-        }
+            .btn-blue:hover {
+                background-color: #2b6cb0;
+            }
 
         .btn-green {
             background-color: #38a169;
             color: white;
         }
 
-        .btn-green:hover {
-            background-color: #2f855a;
-        }
+            .btn-green:hover {
+                background-color: #2f855a;
+            }
 
         .btn {
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -94,24 +97,66 @@
             color: #718096;
         }
 
+        /* 弹窗样式 */
+        #keyModal {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+
+        #keyModalContent {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 显示当前 customKey */
+        #currentKey {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2b6cb0;
+        }
+
+        /* curl 示例 */
+        #curlExample {
+            font-family: monospace;
+            background-color: #f1f1f1;
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 5px;
+        }
 
     </style>
 </head>
 <body class="bg-gray-100">
 
     <div class="container mx-auto py-8">
-        <h1 class="text-3xl font-bold text-center mb-8" id="page-title">Real-Time Request Logger</h1>
+        <h1 class="text-3xl font-bold text-center mb-8" id="page-title">实时请求日志记录</h1>
+
+        <!-- 显示当前 customKey -->
+        <div class="text-center mb-4">
+            当前 Key: <span id="currentKey">无</span>
+        </div>
 
         <!-- 操作按钮 -->
         <div class="flex justify-end mb-4 space-x-2">
+            <button id="changeKeyBtn" class="btn btn-green">
+                更换 Key
+            </button>
             <button id="clearLogsBtn" class="btn btn-red">
-                Clear Logs
+                清空日志
             </button>
             <button id="downloadLogsBtn" class="btn btn-blue">
-                Download Logs
-            </button>
-            <button id="switchLangBtn" class="btn btn-green">
-                Switch to 中文
+                下载日志
             </button>
         </div>
 
@@ -120,12 +165,12 @@
             <table class="table-auto">
                 <thead>
                     <tr>
-                        <th id="th-timestamp">Timestamp</th>
-                        <th id="th-method">Method</th>
-                        <th id="th-path">Path</th>
-                        <th id="th-query">Query String</th>
-                        <th id="th-headers">Headers</th>
-                        <th id="th-body">Body</th>
+                        <th id="th-timestamp">时间戳</th>
+                        <th id="th-method">方法</th>
+                        <th id="th-path">路径</th>
+                        <th id="th-query">查询字符串</th>
+                        <th id="th-headers">请求头</th>
+                        <th id="th-body">请求体</th>
                     </tr>
                 </thead>
                 <tbody id="logTable" class="text-gray-600 text-sm font-light">
@@ -135,107 +180,126 @@
         </div>
     </div>
 
+    <!-- 用户自定义key弹窗 -->
+    <div id="keyModal">
+        <div id="keyModalContent">
+            <h2 class="text-lg font-bold mb-4">请输入您的自定义 Key</h2>
+            <input type="text" id="customKey" class="border border-gray-300 p-2 w-full rounded mb-4" placeholder="请输入自定义 key">
+            <button id="saveKeyBtn" class="btn btn-blue w-full">保存</button>
+            <!-- curl 示例 -->
+            <div id="curlExample" class="mt-4"></div>
+        </div>
+    </div>
+
     <!-- 本地 SignalR JS -->
     <script src="~/js/signalr.min.js"></script>
     <script type="text/javascript">
         let logData = [];
-        let currentLang = 'en'; // 默认语言为英语
+        let customKey = null; // 自定义key
+        let connection = null; // SignalR 连接实例
 
-        const translations = {
-            en: {
-                pageTitle: "Real-Time Request Logger",
-                clearLogs: "Clear Logs",
-                downloadLogs: "Download Logs",
-                switchLang: "Switch to 中文",
-                timestamp: "Timestamp",
-                method: "Method",
-                path: "Path",
-                query: "Query String",
-                headers: "Headers",
-                body: "Body",
-            },
-            zh: {
-                pageTitle: "实时请求日志记录",
-                clearLogs: "清空日志",
-                downloadLogs: "下载日志",
-                switchLang: "切换到 English",
-                timestamp: "时间戳",
-                method: "方法",
-                path: "路径",
-                query: "查询字符串",
-                headers: "请求头",
-                body: "请求体",
+        document.addEventListener("DOMContentLoaded", function () {
+            const keyModal = document.getElementById("keyModal");
+            const saveKeyBtn = document.getElementById("saveKeyBtn");
+            const currentKeyDisplay = document.getElementById("currentKey");
+            const curlExample = document.getElementById("curlExample");
+            const apiBaseUrl = "http://IP:port";  // 替换为实际的 API 地址和端口
+
+            // 更新 curl 示例
+            function updateCurlExample(key) {
+                curlExample.innerText = `curl "${apiBaseUrl}/api/endpoint?customKey=${key}"`;
             }
-        };
 
-        function switchLanguage() {
-            currentLang = currentLang === 'en' ? 'zh' : 'en';
-            const text = translations[currentLang];
+            saveKeyBtn.addEventListener("click", function () {
+                const newKey = document.getElementById("customKey").value;
+                if (newKey) {
+                    localStorage.setItem('customKey', newKey); // 保存自定义key
+                    currentKeyDisplay.textContent = newKey; // 更新显示
 
-            document.getElementById('page-title').textContent = text.pageTitle;
-            document.getElementById('clearLogsBtn').textContent = text.clearLogs;
-            document.getElementById('downloadLogsBtn').textContent = text.downloadLogs;
-            document.getElementById('switchLangBtn').textContent = text.switchLang;
-            document.getElementById('th-timestamp').textContent = text.timestamp;
-            document.getElementById('th-method').textContent = text.method;
-            document.getElementById('th-path').textContent = text.path;
-            document.getElementById('th-query').textContent = text.query;
-            document.getElementById('th-headers').textContent = text.headers;
-            document.getElementById('th-body').textContent = text.body;
-        }
+                    if (connection) {
+                        connection.stop(); // 断开现有连接
+                    }
 
-        document.getElementById('switchLangBtn').addEventListener('click', switchLanguage);
+                    customKey = newKey;
+                    keyModal.style.display = 'none'; // 隐藏弹窗
 
-        // 连接到 SignalR Hub
-        const connection = new signalR.HubConnectionBuilder()
-            .withUrl("/requestHub")
-            .build();
+                    startSignalRConnection(customKey); // 启动新的 SignalR 连接
+                    updateCurlExample(customKey); // 更新 curl 示例
+                }
+            });
 
-        connection.on("ReceiveRequestDetails", function(message) {
-            const logTable = document.getElementById("logTable");
+            // 检查是否有保存的自定义key
+            const savedKey = localStorage.getItem('customKey');
+            if (savedKey) {
+                customKey = savedKey;
+                currentKeyDisplay.textContent = customKey; // 显示当前 Key
+                startSignalRConnection(customKey); // 启动 SignalR 连接
+                updateCurlExample(customKey); // 更新 curl 示例
+            } else {
+                keyModal.style.display = 'flex'; // 如果没有key，显示弹窗
+            }
 
-            const timestamp = new Date().toLocaleTimeString();
-            const lines = message.split("\n");
-            const methodLine = lines.find(line => line.startsWith("Method:"));
-            const pathLine = lines.find(line => line.startsWith("Path:"));
-            const queryString = lines.find(line => line.startsWith("Query String:"));
-            const headersLine = lines.slice(lines.indexOf("Headers:") + 1, lines.indexOf("Body:")).join("<br>");
-            const bodyLine = lines.slice(lines.indexOf("Body:") + 1).join("<br>");
-
-            const newRow = document.createElement("tr");
-            newRow.className = "border-b border-gray-200 hover:bg-gray-100";
-
-            newRow.innerHTML = `
-                <td class="timestamp">${timestamp}</td>
-                <td>${methodLine.replace("Method: ", "")}</td>
-                <td>${pathLine.replace("Path: ", "")}</td>
-                <td>${queryString ? queryString.replace("Query String: ", "") : ""}</td>
-                <td>${headersLine}</td>
-                <td>${bodyLine}</td>
-            `;
-
-            logTable.appendChild(newRow);
-
-            logData.push({
-                timestamp,
-                method: methodLine.replace("Method: ", ""),
-                path: pathLine.replace("Path: ", ""),
-                queryString: queryString ? queryString.replace("Query String: ", "") : "",
-                headers: headersLine,
-                body: bodyLine
+            // 更换 key 按钮
+            document.getElementById('changeKeyBtn').addEventListener('click', function () {
+                keyModal.style.display = 'flex'; // 显示弹窗
             });
         });
 
-        connection.start().catch(function(err) {
-            return console.error(err.toString());
-        });
+        function startSignalRConnection(customKey) {
+            // 初始化并连接到 SignalR
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl(`/requestHub?customKey=${customKey}`)
+                .build();
 
-        document.getElementById("clearLogsBtn").addEventListener("click", function() {
+            connection.start().then(function () {
+                // 注册用户
+                connection.invoke("RegisterUser", customKey);
+            }).catch(function (err) {
+                return console.error(err.toString());
+            });
+
+            // 处理接收到的请求详情
+            connection.on("ReceiveRequestDetails", function (message) {
+                const logTable = document.getElementById("logTable");
+                const timestamp = new Date().toLocaleTimeString();
+                const lines = message.split("\n");
+                const methodLine = lines.find(line => line.startsWith("Method:"));
+                const pathLine = lines.find(line => line.startsWith("Path:"));
+                const queryString = lines.find(line => line.startsWith("Query String:"));
+                const headersLine = lines.slice(lines.indexOf("Headers:") + 1, lines.indexOf("Body:")).join("<br>");
+                const bodyLine = lines.slice(lines.indexOf("Body:") + 1).join("<br>");
+
+                const newRow = document.createElement("tr");
+                newRow.className = "border-b border-gray-200 hover:bg-gray-100";
+                newRow.innerHTML = `
+                                    <td class="timestamp">${timestamp}</td>
+                                    <td>${methodLine.replace("Method: ", "")}</td>
+                                    <td>${pathLine.replace("Path: ", "")}</td>
+                                    <td>${queryString ? queryString.replace("Query String: ", "") : ""}</td>
+                                    <td>${headersLine}</td>
+                                    <td>${bodyLine}</td>
+                                `;
+
+                logTable.appendChild(newRow);
+
+                // 记录日志
+                logData.push({
+                    timestamp,
+                    method: methodLine.replace("Method: ", ""),
+                    path: pathLine.replace("Path: ", ""),
+                    queryString: queryString ? queryString.replace("Query String: ", "") : "",
+                    headers: headersLine,
+                    body: bodyLine
+                });
+            });
+        }
+
+        document.getElementById("clearLogsBtn").addEventListener("click", function () {
             document.getElementById("logTable").innerHTML = "";  // 清空表格
             logData = [];  // 清空日志数据
         });
 
-        document.getElementById("downloadLogsBtn").addEventListener("click", function() {
+        document.getElementById("downloadLogsBtn").addEventListener("click", function () {
             const blob = new Blob([JSON.stringify(logData, null, 2)], { type: "application/json" });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
