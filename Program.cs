@@ -35,17 +35,8 @@ app.Use(async (context, next) =>
     var path = context.Request.Path;
     var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : "N/A";
     var customKey = context.Request.Query["customKey"];
-    var responseMode = context.Request.Query["responseMode"]; // New parameter to control response behavior
     var headers = context.Request.Headers;
     string body = string.Empty;
-
-    // Check if customKey exists
-    if (string.IsNullOrEmpty(customKey))
-    {
-        Console.WriteLine("customKey not provided");
-        await next();
-        return;
-    }
 
     // Read request body (if any)
     if (context.Request.ContentLength > 0)
@@ -66,46 +57,61 @@ app.Use(async (context, next) =>
     }
     requestDetails += $"Body:\n{body}\n";
 
-    // Broadcast via SignalR
-    var hubContext = context.RequestServices.GetRequiredService<IHubContext<RequestHub>>();
-    Console.WriteLine($"Broadcasting to group {customKey}");
-    await hubContext.Clients.Group(customKey).SendAsync("ReceiveRequestDetails", requestDetails);
-
-    // Handle custom response if responseMode is specified
-    if (!string.IsNullOrEmpty(responseMode))
+    // Broadcast via SignalR if customKey exists
+    if (!string.IsNullOrEmpty(customKey))
     {
-        object responseData;
-        
-        try
-        {
-            // If body is provided and valid JSON, use it as response
-            if (!string.IsNullOrEmpty(body))
-            {
-                responseData = JsonSerializer.Deserialize<object>(body);
-            }
-            else
-            {
-                // Default response if no body provided
-                responseData = new
-                {
-                    message = "Custom response",
-                    timestamp = DateTime.UtcNow,
-                    path = path.ToString(),
-                    method = method
-                };
-            }
+        var hubContext = context.RequestServices.GetRequiredService<IHubContext<RequestHub>>();
+        Console.WriteLine($"Broadcasting to group {customKey}");
+        await hubContext.Clients.Group(customKey).SendAsync("ReceiveRequestDetails", requestDetails);
+    }
 
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsJsonAsync(responseData);
+    // Handle custom response parameters
+    var customResponse = context.Request.Query["__response"].ToString();
+    var customStatus = context.Request.Query["__status"].ToString();
+    var customDelay = context.Request.Query["__delay"].ToString();
+
+    // Process custom response if any parameter is specified
+    if (!string.IsNullOrEmpty(customResponse) || !string.IsNullOrEmpty(customStatus) || !string.IsNullOrEmpty(customDelay))
+    {
+        // Handle custom delay
+        if (!string.IsNullOrEmpty(customDelay) && int.TryParse(customDelay, out int delay))
+        {
+            await Task.Delay(delay);
+        }
+
+        // Handle custom status code
+        if (!string.IsNullOrEmpty(customStatus) && int.TryParse(customStatus, out int statusCode))
+        {
+            context.Response.StatusCode = statusCode;
+        }
+
+        // Handle custom response body
+        if (!string.IsNullOrEmpty(customResponse))
+        {
+            try
+            {
+                // Try to parse as JSON first
+                using (JsonDocument.Parse(customResponse))
+                {
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(customResponse);
+                }
+            }
+            catch (JsonException)
+            {
+                // If not valid JSON, return as plain text
+                context.Response.ContentType = "text/plain";
+                await context.Response.WriteAsync(customResponse);
+            }
             return;
         }
-        catch (JsonException)
+        else if (context.Response.StatusCode != 200)
         {
-            // If JSON parsing fails, return error
-            context.Response.StatusCode = 400;
+            // If only status code was set, return a default response
             await context.Response.WriteAsJsonAsync(new
             {
-                error = "Invalid JSON in request body",
+                statusCode = context.Response.StatusCode,
+                message = "Custom status response",
                 timestamp = DateTime.UtcNow
             });
             return;
