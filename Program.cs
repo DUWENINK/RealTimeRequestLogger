@@ -1,16 +1,17 @@
 using Microsoft.AspNetCore.SignalR;
 using RealTimeRequestLogger.Hubs;
 using System.Text;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 添加 SignalR 和 Razor Pages 支持
+// Add SignalR and Razor Pages support
 builder.Services.AddRazorPages();
 builder.Services.AddSignalR();
 
 var app = builder.Build();
 
-// 配置 HTTP 请求管道
+// Configure HTTP request pipeline
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error");
@@ -23,40 +24,41 @@ app.UseRouting();
 app.UseAuthorization();
 app.MapRazorPages();
 
-// 配置 SignalR 路由
+// Configure SignalR route
 app.MapHub<RequestHub>("/requestHub");
 
-// 请求处理中间件
+// Request middleware
 app.Use(async (context, next) =>
 {
-    // 获取请求的相关信息
+    // Get request information
     var method = context.Request.Method;
     var path = context.Request.Path;
     var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : "N/A";
-    var customKey = context.Request.Query["customKey"]; // 获取 customKey
+    var customKey = context.Request.Query["customKey"];
+    var responseMode = context.Request.Query["responseMode"]; // New parameter to control response behavior
     var headers = context.Request.Headers;
     string body = string.Empty;
 
-    // 检查 customKey 是否存在
+    // Check if customKey exists
     if (string.IsNullOrEmpty(customKey))
     {
-        Console.WriteLine("customKey 未提供");
-        await next(); // customKey 不存在时，继续执行下一个中间件
+        Console.WriteLine("customKey not provided");
+        await next();
         return;
     }
 
-    // 读取请求体（如果有）
+    // Read request body (if any)
     if (context.Request.ContentLength > 0)
     {
-        context.Request.EnableBuffering(); // 允许读取请求体多次
+        context.Request.EnableBuffering();
         using (var reader = new StreamReader(context.Request.Body, Encoding.UTF8, true, 1024, leaveOpen: true))
         {
             body = await reader.ReadToEndAsync();
-            context.Request.Body.Position = 0; // 重置流位置，确保后续能继续读取
+            context.Request.Body.Position = 0;
         }
     }
 
-    // 构建请求详情信息
+    // Prepare request details for SignalR
     var requestDetails = $"Method: {method}\nPath: {path}\nQuery String: {queryString}\nHeaders:\n";
     foreach (var header in headers)
     {
@@ -64,12 +66,53 @@ app.Use(async (context, next) =>
     }
     requestDetails += $"Body:\n{body}\n";
 
-    // 通过 SignalR 向指定的 customKey 组广播消息
+    // Broadcast via SignalR
     var hubContext = context.RequestServices.GetRequiredService<IHubContext<RequestHub>>();
-    Console.WriteLine($"向 group {customKey} 发送请求详情");
+    Console.WriteLine($"Broadcasting to group {customKey}");
     await hubContext.Clients.Group(customKey).SendAsync("ReceiveRequestDetails", requestDetails);
 
-    await next(); // 继续处理下一个中间件
+    // Handle custom response if responseMode is specified
+    if (!string.IsNullOrEmpty(responseMode))
+    {
+        object responseData;
+        
+        try
+        {
+            // If body is provided and valid JSON, use it as response
+            if (!string.IsNullOrEmpty(body))
+            {
+                responseData = JsonSerializer.Deserialize<object>(body);
+            }
+            else
+            {
+                // Default response if no body provided
+                responseData = new
+                {
+                    message = "Custom response",
+                    timestamp = DateTime.UtcNow,
+                    path = path.ToString(),
+                    method = method
+                };
+            }
+
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(responseData);
+            return;
+        }
+        catch (JsonException)
+        {
+            // If JSON parsing fails, return error
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = "Invalid JSON in request body",
+                timestamp = DateTime.UtcNow
+            });
+            return;
+        }
+    }
+
+    await next();
 });
 
 app.Run();
