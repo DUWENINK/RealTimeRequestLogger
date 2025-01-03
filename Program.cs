@@ -1,15 +1,29 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
+using RealTimeRequestLogger.Data;
 using RealTimeRequestLogger.Hubs;
 using System.Text;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add SignalR and Razor Pages support
+// 添加数据库支持
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=app.db"));
+
+// 添加SignalR和Razor Pages支持
 builder.Services.AddRazorPages();
 builder.Services.AddSignalR();
 
 var app = builder.Build();
+
+// 确保数据库已创建
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    var context = services.GetRequiredService<ApplicationDbContext>();
+    context.Database.EnsureCreated();
+}
 
 // Configure HTTP request pipeline
 if (!app.Environment.IsDevelopment())
@@ -70,7 +84,18 @@ app.Use(async (context, next) =>
     var customStatus = context.Request.Query["__status"].ToString();
     var customDelay = context.Request.Query["__delay"].ToString();
 
-    // Process custom response if any parameter is specified
+    // 检查数据库中是否有匹配的URL响应
+    var dbContext = context.RequestServices.GetRequiredService<ApplicationDbContext>();
+    var urlResponse = await dbContext.UrlResponses.FirstOrDefaultAsync(u => u.Path == path.ToString());
+    
+    if (urlResponse != null)
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(urlResponse.JsonResponse);
+        return;
+    }
+    
+    // 处理自定义响应参数
     if (!string.IsNullOrEmpty(customResponse) || !string.IsNullOrEmpty(customStatus) || !string.IsNullOrEmpty(customDelay))
     {
         // Handle custom delay

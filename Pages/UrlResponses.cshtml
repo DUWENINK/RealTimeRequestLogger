@@ -1,0 +1,282 @@
+@page
+@using System.Web
+@model RealTimeRequestLogger.Pages.UrlResponsesModel
+@{
+    ViewData["Title"] = "URL响应管理";
+}
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/editor/editor.main.css">
+<style>
+    .table-container {
+        overflow-x: auto;
+        max-width: 100%;
+    }
+    .json-editor-cell {
+        min-width: 400px;
+    }
+    td {
+        vertical-align: top;
+    }
+    .monaco-editor {
+        padding: 10px 0;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+    }
+    .json-editor {
+        min-height: 200px;
+        width: 100%;
+    }
+    .monaco-editor .margin {
+        background-color: #f8f9fa !important;
+    }
+    .monaco-editor .monaco-scrollable-element {
+        box-shadow: inset 0 0 6px rgba(0,0,0,0.1);
+    }
+</style>
+
+<div class="container mx-auto px-4 py-8">
+    <h1 class="text-2xl font-bold mb-6">URL响应管理</h1>
+
+    <!-- 添加新的URL响应 -->
+    <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+        <h2 class="text-xl font-semibold mb-4">添加新的URL响应</h2>
+        <form method="post" id="newResponseForm">
+            @Html.AntiForgeryToken()
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="path">URL路径</label>
+                <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline"
+                       type="text" id="path" name="NewUrlResponse.Path" required
+                       placeholder="/api/example">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="newJsonEditor">JSON响应</label>
+                <div id="newJsonEditor" style="height: 300px; border: 1px solid #ccc;"></div>
+                <input type="hidden" id="newJsonResponse" name="NewUrlResponse.JsonResponse">
+            </div>
+            <div class="flex items-center justify-end">
+                <button class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline"
+                        type="submit" onclick="return updateNewJsonResponse()">
+                    添加
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- 现有URL响应列表 -->
+    <div class="bg-white rounded-lg shadow-md p-6">
+        <h2 class="text-xl font-semibold mb-4">现有URL响应</h2>
+        <div class="table-container">
+            <table class="min-w-full table-auto">
+                <thead>
+                    <tr class="bg-gray-100">
+                        <th class="px-4 py-2">路径</th>
+                        <th class="px-4 py-2">JSON响应</th>
+                        <th class="px-4 py-2">更新时间</th>
+                        <th class="px-4 py-2">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var response in Model.UrlResponses)
+                    {
+                        <tr class="border-t" data-id="@response.Id">
+                            <td class="px-4 py-2">
+                                <input type="text" class="w-full p-1 border rounded" 
+                                       value="@response.Path">
+                            </td>
+                            <td class="px-4 py-2 json-editor-cell">
+                                <div class="json-editor" style="height: 300px; border: 1px solid #ccc; margin: 10px 0;"
+                                     data-content='@response.JsonResponse'></div>
+                            </td>
+                            <td class="px-4 py-2">
+                                @response.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                            </td>
+                            <td class="px-4 py-2">
+                                <div class="flex space-x-2">
+                                    <button class="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-3 rounded text-sm"
+                                            onclick="updateResponse(@response.Id)">
+                                        保存
+                                    </button>
+                                    <form method="post" asp-page-handler="Delete" asp-route-id="@response.Id">
+                                        @Html.AntiForgeryToken()
+                                        <button type="submit" 
+                                                class="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-3 rounded text-sm"
+                                                onclick="return confirm('确定要删除这个URL响应吗？')">
+                                            删除
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script>
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs' }});
+
+        let editors = [];
+        let newEditor;
+
+        const defaultJson = {
+            "code": 200,
+            "success": true,
+            "message": "操作成功",
+            "data": {
+                "id": 12345,
+                "name": "示例数据",
+                "type": "example",
+                "items": [
+                    {
+                        "id": 1,
+                        "title": "第一项",
+                        "description": "这是第一个示例项目",
+                        "status": "active"
+                    },
+                    {
+                        "id": 2,
+                        "title": "第二项",
+                        "description": "这是第二个示例项目",
+                        "status": "pending"
+                    }
+                ],
+                "metadata": {
+                    "timestamp": "2024-01-02T12:00:00Z",
+                    "version": "1.0.0"
+                }
+            }
+        };
+
+        require(['vs/editor/editor.main'], function() {
+            // 设置编辑器主题
+            monaco.editor.defineTheme('customTheme', {
+                base: 'vs',
+                inherit: true,
+                rules: [
+                    { token: 'string', foreground: '0a7a34' },
+                    { token: 'number', foreground: '098658' },
+                    { token: 'keyword', foreground: '0000ff' }
+                ],
+                colors: {
+                    'editor.background': '#f8f9fa',
+                    'editor.lineHighlightBackground': '#f1f5f9',
+                    'editorLineNumber.foreground': '#64748b',
+                    'editorIndentGuide.background': '#e2e8f0'
+                }
+            });
+            monaco.editor.setTheme('customTheme');
+            
+            // 初始化新建表单的编辑器
+            newEditor = monaco.editor.create(document.getElementById('newJsonEditor'), {
+                language: 'json',
+                theme: 'customTheme',
+                minimap: { enabled: false },
+                automaticLayout: true,
+                fontSize: 14,
+                lineHeight: 22,
+                padding: { top: 10, bottom: 10 },
+                value: JSON.stringify(defaultJson, null, 2)
+            });
+
+            // 初始化现有响应的编辑器
+            document.querySelectorAll('.json-editor').forEach(element => {
+                try {
+                    let content = element.dataset.content || '{}';
+                    let jsonObj = JSON.parse(content);
+                    
+                    // 如果是空对象，使用默认JSON结构
+                    if (Object.keys(jsonObj).length === 0) {
+                        jsonObj = {
+                            code: 200,
+                            success: true,
+                            message: "操作成功",
+                            data: {}
+                        };
+                    }
+                    
+                    const editor = monaco.editor.create(element, {
+                        language: 'json',
+                        theme: 'customTheme',
+                        minimap: { enabled: false },
+                        automaticLayout: true,
+                        fontSize: 14,
+                        lineHeight: 22,
+                        padding: { top: 10, bottom: 10 },
+                        value: JSON.stringify(jsonObj, null, 2)
+                    });
+                    editors.push(editor);
+                } catch (e) {
+                    console.error('初始化编辑器失败:', e);
+                    const editor = monaco.editor.create(element, {
+                        language: 'json',
+                        theme: 'customTheme',
+                        minimap: { enabled: false },
+                        automaticLayout: true,
+                        fontSize: 14,
+                        lineHeight: 22,
+                        padding: { top: 10, bottom: 10 },
+                        value: JSON.stringify({
+                            code: 200,
+                            success: true,
+                            message: "操作成功",
+                            data: {}
+                        }, null, 2)
+                    });
+                    editors.push(editor);
+                }
+            });
+        });
+
+        function updateNewJsonResponse() {
+            try {
+                // 验证JSON格式
+                JSON.parse(newEditor.getValue());
+                document.getElementById('newJsonResponse').value = newEditor.getValue();
+                return true;
+            } catch (e) {
+                alert('请输入有效的JSON格式');
+                return false;
+            }
+        }
+
+        async function updateResponse(id) {
+            const row = document.querySelector(`tr[data-id="${id}"]`);
+            const path = row.querySelector('input[type="text"]').value;
+            const editorElement = row.querySelector('.json-editor');
+            const editorIndex = Array.from(document.querySelectorAll('.json-editor')).indexOf(editorElement);
+            const jsonResponse = editors[editorIndex].getValue();
+
+            try {
+                // 验证JSON格式
+                JSON.parse(jsonResponse);
+            } catch (e) {
+                alert('请输入有效的JSON格式');
+                return;
+            }
+
+            try {
+                const response = await fetch('?handler=Update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'RequestVerificationToken': document.querySelector('input[name="__RequestVerificationToken"]').value,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: JSON.stringify({ id, path, jsonResponse })
+                });
+
+                if (!response.ok) {
+                    throw new Error(await response.text());
+                }
+
+                window.location.reload();
+            } catch (error) {
+                alert('更新失败: ' + error.message);
+            }
+        }
+    </script>
+}
