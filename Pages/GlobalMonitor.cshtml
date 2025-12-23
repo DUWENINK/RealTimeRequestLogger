@@ -1,0 +1,229 @@
+@page
+@model GlobalMonitorModel
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>@ViewData["Title"]</title>
+    <!-- 本地 Tailwind CSS -->
+    <link rel="stylesheet" href="~/css/tailwind.min.css">
+    <style>
+        /* 调整的样式 */
+        .log-container {
+            height: calc(100vh - 200px); /* 使表格占满全屏 */
+            width: 100%;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 12px;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: left;
+        }
+
+        th {
+            background-color: #edf2f7;
+            color: #2d3748;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f7fafc;
+        }
+
+        tr:hover {
+            background-color: #ebf8ff;
+        }
+
+        /* 按钮样式 */
+        .btn {
+            display: inline-block;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            border-radius: 5px;
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+            cursor: pointer;
+        }
+
+        .btn-red {
+            background-color: #e53e3e;
+            color: white;
+        }
+
+            .btn-red:hover {
+                background-color: #c53030;
+            }
+
+        .btn-blue {
+            background-color: #3182ce;
+            color: white;
+        }
+
+            .btn-blue:hover {
+                background-color: #2b6cb0;
+            }
+
+        .btn {
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        /* 时间戳样式 */
+        .timestamp {
+            font-family: monospace;
+            color: #718096;
+        }
+
+        /* 提示框样式 */
+        .info-box {
+            background-color: #e6fffa;
+            border: 2px solid #81e6d9;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #234e52;
+        }
+
+        .info-box h3 {
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .info-box p {
+            margin: 5px 0;
+        }
+
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <div class="container mx-auto py-8">
+        <h1 class="text-3xl font-bold text-center mb-8">全局请求监听 🌍</h1>
+
+        <!-- 说明信息 -->
+        <div class="info-box">
+            <h3>📡 全局监听模式</h3>
+            <p>此页面会实时显示所有打入 <code>http://your-ip:port/</code> 的请求(不包括带有 customKey 参数的请求)</p>
+            <p>使用示例: <code>curl http://your-ip:port/api/test</code></p>
+            <p>❌ 带 customKey 的请求会被过滤: <code>curl http://your-ip:port/api/test?customKey=xxx</code></p>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="flex justify-end mb-4 space-x-2">
+            <button id="clearLogsBtn" class="btn btn-red">
+                清空日志
+            </button>
+            <button id="downloadLogsBtn" class="btn btn-blue">
+                下载日志
+            </button>
+        </div>
+
+        <!-- 请求日志表格 -->
+        <div class="bg-white shadow-md rounded-lg p-4 log-container">
+            <table class="table-auto">
+                <thead>
+                    <tr>
+                        <th>时间戳</th>
+                        <th>方法</th>
+                        <th>路径</th>
+                        <th>查询字符串</th>
+                        <th>请求头</th>
+                        <th>请求体</th>
+                    </tr>
+                </thead>
+                <tbody id="logTable" class="text-gray-600 text-sm font-light">
+                    <!-- 实时数据将被插入到这里 -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 本地 SignalR JS -->
+    <script src="~/js/signalr.min.js"></script>
+    <script type="text/javascript">
+        let logData = [];
+        let connection = null; // SignalR 连接实例
+
+        document.addEventListener("DOMContentLoaded", function () {
+            startSignalRConnection();
+        });
+
+        function startSignalRConnection() {
+            // 初始化并连接到 SignalR
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl("/requestHub")
+                .build();
+
+            connection.start().then(function () {
+                // 注册到全局监听组
+                connection.invoke("RegisterGlobalMonitor");
+                console.log("Connected to global monitor");
+            }).catch(function (err) {
+                return console.error(err.toString());
+            });
+
+            // 处理接收到的请求详情
+            connection.on("ReceiveRequestDetails", function (message) {
+                const logTable = document.getElementById("logTable");
+                const timestamp = new Date().toLocaleTimeString();
+                const lines = message.split("\n");
+                const methodLine = lines.find(line => line.startsWith("Method:"));
+                const pathLine = lines.find(line => line.startsWith("Path:"));
+                const queryString = lines.find(line => line.startsWith("Query String:"));
+                const headersLine = lines.slice(lines.indexOf("Headers:") + 1, lines.indexOf("Body:")).join("<br>");
+                const bodyLine = lines.slice(lines.indexOf("Body:") + 1).join("<br>");
+
+                const newRow = document.createElement("tr");
+                newRow.className = "border-b border-gray-200 hover:bg-gray-100";
+                newRow.innerHTML = `
+                    <td class="timestamp">${timestamp}</td>
+                    <td>${methodLine.replace("Method: ", "")}</td>
+                    <td>${pathLine.replace("Path: ", "")}</td>
+                    <td>${queryString ? queryString.replace("Query String: ", "") : ""}</td>
+                    <td>${headersLine}</td>
+                    <td>${bodyLine}</td>
+                `;
+
+                logTable.appendChild(newRow);
+
+                // 记录日志
+                logData.push({
+                    timestamp,
+                    method: methodLine.replace("Method: ", ""),
+                    path: pathLine.replace("Path: ", ""),
+                    queryString: queryString ? queryString.replace("Query String: ", "") : "",
+                    headers: headersLine,
+                    body: bodyLine
+                });
+            });
+        }
+
+        document.getElementById("clearLogsBtn").addEventListener("click", function () {
+            document.getElementById("logTable").innerHTML = "";  // 清空表格
+            logData = [];  // 清空日志数据
+        });
+
+        document.getElementById("downloadLogsBtn").addEventListener("click", function () {
+            const blob = new Blob([JSON.stringify(logData, null, 2)], { type: "application/json" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "global-request-logs.json";
+            link.click();
+        });
+    </script>
+</body>
+</html>

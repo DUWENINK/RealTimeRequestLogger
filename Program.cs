@@ -71,12 +71,20 @@ app.Use(async (context, next) =>
     }
     requestDetails += $"Body:\n{body}\n";
 
-    // Broadcast via SignalR if customKey exists
+    // Broadcast via SignalR
+    var hubContext = context.RequestServices.GetRequiredService<IHubContext<RequestHub>>();
+
     if (!string.IsNullOrEmpty(customKey))
     {
-        var hubContext = context.RequestServices.GetRequiredService<IHubContext<RequestHub>>();
+        // 如果有customKey,发送到指定组
         Console.WriteLine($"Broadcasting to group {customKey}");
         await hubContext.Clients.Group(customKey).SendAsync("ReceiveRequestDetails", requestDetails);
+    }
+    else
+    {
+        // 如果没有customKey,发送到全局监听组
+        Console.WriteLine($"Broadcasting to global monitor group");
+        await hubContext.Clients.Group("__global_monitor__").SendAsync("ReceiveRequestDetails", requestDetails);
     }
 
     // Handle custom response parameters

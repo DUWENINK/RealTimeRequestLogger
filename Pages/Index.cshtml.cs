@@ -12,9 +12,10 @@ namespace RealTimeRequestLogger.Pages
             _logger = logger;
         }
 
-        public void OnGet()
+        public IActionResult OnGet()
         {
-
+            // 重定向到全局监听页面
+            return RedirectToPage("/GlobalMonitor");
         }
     }
 }
